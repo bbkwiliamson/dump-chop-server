@@ -1,0 +1,20 @@
+#!/bin/bash
+
+BACKUP_DIR="/var/backups"
+BACKUP_FILE=$(ls -t "$BACKUP_DIR" | head -1)  # Get the latest backup file
+THRESHOLD_DAYS=15
+TELEGRAM_BOT_TOKEN="<%= node['backup_monitor']['telegram_bot_token'] %>"
+TELEGRAM_CHAT_ID="<%= node['backup_monitor']['telegram_chat_id'] %>"
+
+if [[ -z "$BACKUP_FILE" ]]; then
+    MESSAGE="No backups found in $BACKUP_DIR! Dump-chop repo VM"
+elif [[ $(find "$BACKUP_DIR/$BACKUP_FILE" -mtime +$THRESHOLD_DAYS) ]]; then
+    MESSAGE="Dump-chop VM Backup $BACKUP_FILE is older than $THRESHOLD_DAYS days!"
+else
+    exit 0  # Backup is recent, exit without alert
+fi
+
+# Send alert via Telegram
+curl -s -X POST "https://api.telegram.org/bot$TELEGRAM_BOT_TOKEN/sendMessage" \
+     -d chat_id="$TELEGRAM_CHAT_ID" \
+     -d text="$MESSAGE"
