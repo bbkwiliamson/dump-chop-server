@@ -1,0 +1,49 @@
+#!/bin/bash
+
+# Variables
+TELEGRAM_BOT_TOKEN="<%= @telegram_bot_token %>"
+TELEGRAM_CHAT_ID="<%= @telegram_chat_id %>"
+THRESHOLD=50  # Threshold for VM free space in GB
+
+# Get available space in GB for /var
+free_space_var=$(df -BG --output=avail /var | tail -1 | tr -d 'G ')
+
+# Get usage percentage for /var
+usage_var=$(df -h --output=pcent /var | tail -1 | tr -d '% ')
+
+# Get available space in GB for the entire VM (root volume "/")
+free_space_vm=$(df -BG --output=avail / | tail -1 | tr -d 'G ')
+
+# Determine the space to add for /var
+size=0
+
+if [ "$free_space_var" -lt 10 ]; then
+  size=10
+elif [ "$usage_var" -ge 70 ]; then
+  size=10
+elif [ "$usage_var" -ge 50 ]; then
+  size=10
+fi
+
+# Extend Logical Volume for /var if needed
+if [ "$size" -gt 0 ]; then
+  # Check available space in Volume Group
+  vg_free_space=$(vgs --noheadings -o vg_free --units G systemvg | tr -d ' G')
+
+  if (( $(echo "$vg_free_space >= $size" | bc -l) )); then
+    lvextend -An -L +${size}GB /dev/mapper/systemvg-varlv
+    xfs_growfs /dev/mapper/systemvg-varlv
+    echo "Extended /var by ${size}GB"
+  else
+    echo "Not enough free space in volume group."
+  fi
+fi
+
+# Send Telegram notification if VM free space is below 50GB
+if [ "$free_space_vm" -lt "$THRESHOLD" ]; then
+    MESSAGE="⚠️Warning: Low disk space on VM! Remaining space: ${free_space_vm}GB Action Required: Consider increasing volume size."
+
+    curl -s -X POST "https://api.telegram.org/bot$TELEGRAM_BOT_TOKEN/sendMessage" \
+         -d chat_id="$TELEGRAM_CHAT_ID" \
+         -d text="$MESSAGE"
+fi
