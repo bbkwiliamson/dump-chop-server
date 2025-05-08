@@ -1,0 +1,35 @@
+server {
+    listen 80;
+    server_name <%= @domain_or_ip %>;
+    access_log  /var/log/nginx/dump.access.log;
+    error_log /var/log/nginx/dump_error.log crit;
+
+    root <%= @external_disk %>/var/www/dump;
+    index index.html index.htm;                    # Define default index files
+
+    # Serve /dump by default when accessing /
+    location / {
+        #root /var/www/dump/;                      # Set default root to /dump
+        index index.html index.htm;                # Serve index file if available
+        autoindex on;                              # Enable directory listing if no index file exists
+        autoindex_exact_size off;                  # Show file sizes in human-readable format
+        autoindex_format html;                     # Use HTML format for the index page
+        add_header X-Frame-Options DENY;           # Improve security by blocking iframe embedding
+        add_header X-Content-Type-Options nosniff; # Prevent MIME-type sniffing
+    }
+    
+    location ~* (cgi-bin|tmui|vpns|mgmt|rest|EemAdminService) {
+        deny all;
+        return 403;
+    }
+
+    # NGINX Status Page
+    location /nginx_status {
+        stub_status on;
+        access_log off;                            # Disable logging for status requests
+        allow 127.0.0.1;                           # Allow local access
+        allow <%= @ipaddress %>;                   # Allow hostname access
+        deny all;                                  # block all other IPs
+       
+    }
+}
