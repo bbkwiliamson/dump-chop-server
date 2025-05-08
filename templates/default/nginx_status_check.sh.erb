@@ -1,0 +1,65 @@
+#!/bin/bash
+
+# URL to NGINX status page
+NGINX_STATUS_URL="http://<%= @ipaddress %>/nginx_status"
+BOT_TOKEN="<%= node['backup_monitor']['telegram_bot_token'] %>"
+CHAT_ID="<%= node['backup_monitor']['telegram_chat_id'] %>"
+
+# Send a Telegram message
+send_telegram_alert() {
+    local message="$1"
+    curl -s --data "chat_id=${CHAT_ID}&text=${message}" "https://api.telegram.org/bot${BOT_TOKEN}/sendMessage" > /dev/null
+}
+
+# Get NGINX status using curl with timeout and error handling
+status=$(curl -s --max-time 5 "$NGINX_STATUS_URL")
+echo "NGINX status output: $status"
+
+# If curl fails or status is empty, send an alert
+if [[ -z "$status" ]]; then
+    send_telegram_alert "⚠️ NGINX service is down on $(hostname)"
+    exit 1
+fi
+
+# Extract values safely
+active_connections=$(echo "$status" | grep "Active connections:" | awk '{print $3}')
+requests=$(echo "$status" | awk '/server\s+accepts\s+handled\s+requests/{getline; print $3}')
+# Debugging - print raw requests value
+echo "requests output: $requests"
+
+# Check if extracted values are valid numbers
+if ! [[ "$active_connections" =~ ^[0-9]+$ ]]; then
+    send_telegram_alert "❌Exception: Unable to parse active connections on $(hostname)"
+    exit 1
+fi
+
+
+if ! [[ "$requests" =~ ^[0-9]+$ ]]; then
+    send_telegram_alert "❌Exception: Unable to parse request count on $(hostname)"
+    exit 1
+fi
+
+# Define thresholds for alerting
+MAX_ACTIVE_CONN=10000
+MAX_REQUESTS=20000
+
+# Check thresholds
+if (( active_connections > MAX_ACTIVE_CONN )); then
+    send_telegram_alert "🚨ALERTS: Active connections exceeded $MAX_ACTIVE_CONN (Current: $active_connections) on $(hostname)"
+    exit 1
+fi
+
+if (( requests > MAX_REQUESTS )); then
+    send_telegram_alert "🚨ALERTS: Total requests exceeded $MAX_REQUESTS (Current: $requests) on $(hostname)"
+    exit 1
+fi
+
+# Ensure "active" is present in status page (basic health check)
+if ! echo "$status" | grep -q "Active connections"; then
+    send_telegram_alert "⚠️WARNING: NGINX service status page is missing expected values on $(hostname)"
+    exit 1
+fi
+
+# If all checks pass, confirm NGINX is healthy
+send_telegram_alert "✅ NGINX service status is healthy on $(hostname)"
+exit 0
