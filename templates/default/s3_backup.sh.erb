@@ -1,0 +1,45 @@
+#!/bin/bash
+
+# Variables
+NOW=$(date +"%Y-%m-%d_%H-%M-%S")
+BUCKET_NAME="<%= @s3_bucket %>"
+STORAGE_PATH="<%= @external_disk_path %>"
+BACKUP_FILE="$STORAGE_PATH/dump-$NOW.tar.gz"
+TELEGRAM_BOT_TOKEN="<%= @telegram_bot_token %>"
+TELEGRAM_CHAT_ID="<%= @telegram_chat_id %>"
+BACKUP_DIR="<%= @backup_dir %>"
+HOST_VM="<%= @hostname %>"
+
+
+# Ensure the external disk directory exists
+mkdir -p "$STORAGE_PATH"
+
+# Create the backup and exclude specific directories
+tar -cvf "$BACKUP_FILE" --exclude="$BACKUP_DIR/dump*" --exclude="$BACKUP_DIR/iso" --exclude="$BACKUP_DIR/qcow2" "$BACKUP_DIR"
+
+# Ensure /backups exists in S3 bucket (optional, creates a placeholder file)
+aws s3 cp /dev/null "s3://$BUCKET_NAME/backups/.keep"
+
+# Upload the backup to S3
+aws s3 cp "$BACKUP_FILE" "s3://$BUCKET_NAME/backups/dump-$HOST_VM-$NOW.tar.gz"
+
+# Check if upload was successful
+if [ $? -eq 0 ]; then
+    echo "Backup successfully uploaded to S3: s3://$BUCKET_NAME/dumpbackups/dump-$NOW.tar.gz"
+    
+    # Send Telegram notification
+    MESSAGE="Dump-chop Backup completed successfully! \nFile: dump-$NOW.tar.gz \nLocation: s3://$BUCKET_NAME/backups/"
+    curl -s -X POST "https://api.telegram.org/bot$TELEGRAM_BOT_TOKEN/sendMessage" \
+         -d chat_id=$TELEGRAM_CHAT_ID \
+         -d text="$MESSAGE"
+
+    rm -rf $BACKUP_FILE  # Remove local backup after successful upload
+    echo "Backup deleted from local storage: $BACKUP_FILE"
+else
+    echo "Backup upload to S3 failed!"
+
+    # Send Telegram failure notification
+    curl -s -X POST "https://api.telegram.org/bot$TELEGRAM_BOT_TOKEN/sendMessage" \
+         -d chat_id=$TELEGRAM_CHAT_ID \
+         -d text="Dump-chop Backup FAILED to upload to S3!"
+fi
